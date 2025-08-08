@@ -1,0 +1,7 @@
+{
+  "dotnet.projects.enableFileBasedPrograms": true,
+  "cSpell.words": [
+    "Ggml",
+    "Resampler"
+  ]
+}
