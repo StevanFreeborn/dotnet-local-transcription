@@ -73,22 +73,6 @@ foreach (var i in Enumerable.Range(0, numOfSegments))
   }
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 static async Task<WhisperProcessor> GetProcessor()
 {
   using var memoryStream = new MemoryStream();
