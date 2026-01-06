@@ -71,7 +71,6 @@ try
 }
 finally
 {
-  // Cleanup temporary file
   if (File.Exists(tempWavPath))
   {
     try
@@ -80,7 +79,6 @@ finally
     }
     catch
     {
-      // Best effort cleanup 
     }
   }
 }
