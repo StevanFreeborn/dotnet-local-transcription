@@ -6,7 +6,6 @@
 
 using FFMpegCore;
 using FFMpegCore.Enums;
-using FFMpegCore.Pipes;
 using NAudio.Wave;
 using Whisper.net;
 using Whisper.net.Ggml;
@@ -25,61 +24,74 @@ if (File.Exists(videoPath) is false)
   return;
 }
 
-using var mp4Stream = File.OpenRead(videoPath);
-using var mp3Stream = new MemoryStream();
+var tempWavPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.wav");
 
-await FFMpegArguments
-  .FromPipeInput(new StreamPipeSource(mp4Stream))
-  .OutputToPipe(
-    new StreamPipeSink(mp3Stream),
-    static o => o.DisableChannel(Channel.Video).ForceFormat("mp3")
-  )
-  .ProcessAsynchronously();
-
-mp3Stream.Position = 0;
-using var reader = new Mp3FileReader(mp3Stream);
-var outFormat = new WaveFormat(16000, reader.WaveFormat.Channels);
-using var resampler = new MediaFoundationResampler(reader, outFormat);
-using var waveStream = new MemoryStream();
-WaveFileWriter.WriteWavFileToStream(waveStream, resampler);
-
-waveStream.Position = 0;
-using var waveReader = new WaveFileReader(waveStream);
-var segmentDuration = TimeSpan.FromMinutes(2);
-var totalDuration = waveReader.TotalTime;
-var numOfSegments = (int)Math.Ceiling(totalDuration.TotalSeconds / segmentDuration.TotalSeconds);
-
-foreach (var i in Enumerable.Range(0, numOfSegments))
+try
 {
-  waveStream.Position = 0;
-  using var segmentReader = new WaveFileReader(waveStream);
-  var segment = segmentReader.ToSampleProvider()
-    .Skip(i * segmentDuration)
-    .Take(segmentDuration);
+  await FFMpegArguments
+      .FromFileInput(videoPath)
+      .OutputToFile(tempWavPath, true, options => options
+          .DisableChannel(Channel.Video)
+          .ForceFormat("wav")
+          .WithAudioSamplingRate(16000)
+      )
+      .ProcessAsynchronously();
 
-  var segmentProvider = segment.ToWaveProvider16();
-  var segmentStream = new MemoryStream();
-  WaveFileWriter.WriteWavFileToStream(segmentStream, segmentProvider);
+  using var waveReader = new WaveFileReader(tempWavPath);
 
-  segmentStream.Position = 0;
+  var segmentDuration = TimeSpan.FromMinutes(2);
+  var totalDuration = waveReader.TotalTime;
+  var numOfSegments = (int)Math.Ceiling(totalDuration.TotalSeconds / segmentDuration.TotalSeconds);
+
   using var processor = await GetProcessor();
-  var durationOffset = TimeSpan.FromSeconds(i * segmentDuration.TotalSeconds);
 
-  await foreach (var result in processor.ProcessAsync(segmentStream))
+  foreach (var i in Enumerable.Range(0, numOfSegments))
   {
-    var startTime = result.Start + durationOffset;
-    var endTime = result.End + durationOffset;
-    Console.WriteLine($"[{startTime:hh\\:mm\\:ss} - {endTime:hh\\:mm\\:ss}]: {result.Text}");
+    using var segmentReader = new WaveFileReader(tempWavPath);
+
+    var segment = segmentReader.ToSampleProvider()
+        .Skip(i * segmentDuration)
+        .Take(segmentDuration);
+
+    var segmentProvider = segment.ToWaveProvider16();
+    using var segmentStream = new MemoryStream();
+    WaveFileWriter.WriteWavFileToStream(segmentStream, segmentProvider);
+
+    segmentStream.Position = 0;
+
+    var durationOffset = TimeSpan.FromSeconds(i * segmentDuration.TotalSeconds);
+
+    await foreach (var result in processor.ProcessAsync(segmentStream))
+    {
+      var startTime = result.Start + durationOffset;
+      var endTime = result.End + durationOffset;
+      Console.WriteLine($"[{startTime:hh\\:mm\\:ss} - {endTime:hh\\:mm\\:ss}]: {result.Text}");
+    }
+  }
+}
+finally
+{
+  // Cleanup temporary file
+  if (File.Exists(tempWavPath))
+  {
+    try
+    {
+      File.Delete(tempWavPath);
+    }
+    catch
+    {
+      // Best effort cleanup 
+    }
   }
 }
 
 static async Task<WhisperProcessor> GetProcessor()
 {
   using var memoryStream = new MemoryStream();
-  var model = await WhisperGgmlDownloader.Default.GetGgmlModelAsync(GgmlType.TinyEn);
+  var model = await WhisperGgmlDownloader.Default.GetGgmlModelAsync(GgmlType.BaseEn);
   await model.CopyToAsync(memoryStream);
   var whisperFactory = WhisperFactory.FromBuffer(memoryStream.ToArray());
   return whisperFactory.CreateBuilder()
-    .WithLanguage("en")
-    .Build();
+      .WithLanguage("en")
+      .Build();
 }
