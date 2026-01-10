@@ -1,6 +1,7 @@
 #:property AssemblyName=transcribe
 #:property BuiltInComInteropSupport=true
 #:property PublishAot=false
+#:property ErrorOnDuplicatePublishOutputFiles=false
 
 #:package FFMpegCore@5.2.0
 #:package NAudio@2.2.1
